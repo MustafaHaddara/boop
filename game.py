@@ -31,10 +31,12 @@ RM_HEIGHT = 480
 CELL_SIZE = 32
 
 BLANK_CELL_COLOR = (96, 96, 96)
-WALL_CELL_COLOR = (123, 94, 55)
+WALL_CELL_COLOR = (48, 48, 48)
 LINE_COLOR = (160, 160, 160)
 GOAL_COLOR = (0, 218, 67)
 ENEMY_COLOR = (255, 0, 0)
+UI_COLOR_FILLED = (255,255,255)
+UI_COLOR_UNFILLED = (128,128,128)
 
 class GameObject(object):
     def __init__(self, x, y):
@@ -93,13 +95,9 @@ class Player(GameObject):
         if self.pulse is not None:
             self.pulse.draw(window)
 
-    def move(self, direction, distance):
+    def move(self, pos):
         self.energy += 1
-        d = distance if not (direction == 'left' or direction == 'up') else -1*distance
-        if direction == 'left' or direction == 'right':
-            self.x += d
-        elif direction == 'up' or direction == 'down':
-            self.y += d
+        self.x,self.y = pos
 
     def fire(self):
         pos = self.getCenter()
@@ -144,7 +142,7 @@ class Player(GameObject):
             y = 32
             x = xoffset+(i*xdist)
             # if i>0:
-            color = (255,255,255) if i<charges else (128,128,128)
+            color = UI_COLOR_FILLED if i<charges else UI_COLOR_UNFILLED
             self.drawRings(window, i, (x,y), color)
 
     def drawRings(self, window, numRings, center, color):
@@ -167,8 +165,7 @@ class Pulse(GameObject):
 
     def draw(self, window):
         if (self.radius < self.energy):
-            # pygame.draw.circle(window, pygame.Color(255,255,255), self.pos(), self.radius, 1)
-            gfxdraw.circle(window, self.x, self.y, self.radius, (255,255,255))
+            gfxdraw.circle(window, self.x, self.y, self.radius, UI_COLOR_FILLED)
             self.radius += 1
         else:
             self.killme()
@@ -188,10 +185,13 @@ class GameController(object):
         self.font = pygame.font.Font(None, 20)
 
         self.cells = []
+        maxX = RM_WIDTH  - CELL_SIZE
+        maxY = RM_HEIGHT - CELL_SIZE
         for y in range(0, RM_HEIGHT, CELL_SIZE):
             row = []
             for x in range(0, RM_WIDTH, CELL_SIZE):
-                row.append(Cell(x, y))
+                c = Cell(x, y, (x==0 or x==maxX or y==0 or y==maxY))
+                row.append(c)
             self.cells.append(row)
 
         self.player = Player(self.getCellXY(x=RM_WIDTH/(2*CELL_SIZE), y=RM_HEIGHT/(2*CELL_SIZE)))
@@ -235,7 +235,7 @@ class GameController(object):
                 cell.draw(self.window)
 
     def drawUI(self):
-        text = self.font.render(self.player.getEnergyString(), True, (255,255,255))
+        text = self.font.render(self.player.getEnergyString(), True, UI_COLOR_FILLED)
         self.window.blit(text, (6,6))
         self.player.drawCharges(self.window)
 
@@ -243,18 +243,30 @@ class GameController(object):
         if keyCode == K_SPACE:
             self.player.fire()
         elif keyCode == K_UP:
-            self.player.move('up', CELL_SIZE)
+            self.movePlayer('up', CELL_SIZE)
         elif keyCode == K_DOWN:
-            self.player.move('down', CELL_SIZE)
+            self.movePlayer('down', CELL_SIZE)
         elif keyCode == K_RIGHT:
-            self.player.move('right', CELL_SIZE)
+            self.movePlayer('right', CELL_SIZE)
         elif keyCode == K_LEFT:
-            self.player.move('left', CELL_SIZE)
+            self.movePlayer('left', CELL_SIZE)
         else:
             return False
         pos = self.normalizePixelCoord(self.player.pos())
         self.aiController.findPaths(self.cells, self.getCell(pos))
         return True
+
+    def movePlayer(self, direction, distance):
+        newPos = self.player.pos()
+        d = distance if not (direction == 'left' or direction == 'up') else -1*distance
+        if direction == 'left' or direction == 'right':
+            newPos = (newPos[0]+d, newPos[1])
+        elif direction == 'up' or direction == 'down':
+            newPos = (newPos[0], newPos[1]+d)
+        coords = self.normalizePixelCoord(newPos)
+        cell = self.getCell(coords)
+        if not cell.isWall():
+            self.player.move(newPos)
 
     def quit(self):
         pygame.quit()
