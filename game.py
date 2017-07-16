@@ -24,12 +24,13 @@ from Queue import Queue
 
 import pygame
 from pygame.locals import *
+from pygame import gfxdraw
 
 RM_WIDTH = 672
 RM_HEIGHT = 480
 CELL_SIZE = 32
 
-BLANK_CELL_COLOR = (192, 192, 192)
+BLANK_CELL_COLOR = (96, 96, 96)
 WALL_CELL_COLOR = (123, 94, 55)
 LINE_COLOR = (160, 160, 160)
 GOAL_COLOR = (0, 218, 67)
@@ -51,13 +52,13 @@ class Cell(GameObject):
 
     def draw(self, window):
         rect = pygame.Rect(self.x, self.y, CELL_SIZE, CELL_SIZE)
-        color, lineColor = BLANK_CELL_COLOR, LINE_COLOR
+        color = BLANK_CELL_COLOR
         if self.isWall():
             color = WALL_CELL_COLOR
 
         window.fill(color, rect)
-        if not self.isWall():
-            pygame.draw.rect(window, lineColor, rect, 1)
+        # if not self.isWall():
+        #     pygame.draw.rect(window, LINE_COLOR, rect, 1)
 
     def flip(self):
         self.wall = not self.wall
@@ -73,7 +74,7 @@ class Enemy(GameObject):
     def draw(self, window):
         center = (self.x + (CELL_SIZE / 2), self.y + (CELL_SIZE / 2))
         radius = CELL_SIZE / 8
-        pygame.draw.circle(window, ENEMY_COLOR, center, radius)
+        gfxdraw.filled_circle(window, center[0], center[1], radius, ENEMY_COLOR)
 
     def getGridPos(self):
         return (self.x / CELL_SIZE, self.y / CELL_SIZE)
@@ -88,7 +89,7 @@ class Player(GameObject):
     def draw(self, window):
         center = (self.x + (CELL_SIZE / 2), self.y + (CELL_SIZE / 2))
         radius = CELL_SIZE / 4
-        pygame.draw.circle(window, GOAL_COLOR, center, radius)
+        gfxdraw.filled_circle(window, center[0], center[1], radius, GOAL_COLOR)
         if self.pulse is not None:
             self.pulse.draw(window)
 
@@ -102,7 +103,7 @@ class Player(GameObject):
 
     def fire(self):
         pos = self.getCenter()
-        self.pulse = Pulse(pos[0], pos[1], self.energy*10, self.clearPulse)
+        self.pulse = Pulse(pos[0], pos[1], self.getCharges(), self.clearPulse)
         self.energy = 0
 
     def getCenter(self):
@@ -114,17 +115,60 @@ class Player(GameObject):
     def getPulse(self):
         return self.pulse
 
+    def getEnergyString(self):
+        return 'Energy: ' + str(self.energy)
+
+    def getCharges(self):
+        # 0     -> 0
+        # 1-10  -> 1
+        # 11-25 -> 2
+        # 25-75 -> 3
+        # 75+   -> 4
+        if self.energy >= 75:
+            return 4
+        elif self.energy >= 25:
+            return 3
+        elif self.energy >= 10:
+            return 2
+        elif self.energy >= 1:
+            return 1
+        else:
+            return 0
+
+    def drawCharges(self, window):
+        charges = self.getCharges()
+        # 5 circles, rad = 20
+        for i in xrange(4):
+            xoffset = 12
+            xdist = 10 + (i**2)/2
+            y = 32
+            x = xoffset+(i*xdist)
+            # if i>0:
+            color = (255,255,255) if i<charges else (128,128,128)
+            self.drawRings(window, i, (x,y), color)
+
+    def drawRings(self, window, numRings, center, color):
+        radius = 2
+        numRings = numRings*2
+        gfxdraw.pixel(window, center[0], center[1], color)
+        while numRings > 0:
+            numRings -= 1
+            radius += 1
+            if numRings%2:
+                gfxdraw.circle(window, center[0],center[1], radius, color)
+
 
 class Pulse(GameObject):
     def __init__(self, x, y, energy, callback):
         super(self.__class__, self).__init__(x, y)
-        self.energy = energy
+        self.energy = energy * CELL_SIZE + (CELL_SIZE/2)
         self.radius = 2
         self.killme = callback
 
     def draw(self, window):
         if (self.radius < self.energy):
-            pygame.draw.circle(window, pygame.Color(255,255,255), self.pos(), self.radius, 1)
+            # pygame.draw.circle(window, pygame.Color(255,255,255), self.pos(), self.radius, 1)
+            gfxdraw.circle(window, self.x, self.y, self.radius, (255,255,255))
             self.radius += 1
         else:
             self.killme()
@@ -141,6 +185,8 @@ class GameController(object):
         pygame.init()
         pygame.event.set_allowed([pygame.QUIT, MOUSEBUTTONDOWN])
         self.window = pygame.display.set_mode((RM_WIDTH, RM_HEIGHT))
+        self.font = pygame.font.Font(None, 20)
+
         self.cells = []
         for y in range(0, RM_HEIGHT, CELL_SIZE):
             row = []
@@ -168,6 +214,7 @@ class GameController(object):
                 self.aiController.computePositions()
             self.aiController.detectPulseCollisions(self.player.getPulse())
             self.aiController.draw(self.window)
+            self.drawUI()
 
             clock.tick_busy_loop(frameRate)
             pygame.display.flip()
@@ -186,6 +233,11 @@ class GameController(object):
         for row in self.cells:
             for cell in row:
                 cell.draw(self.window)
+
+    def drawUI(self):
+        text = self.font.render(self.player.getEnergyString(), True, (255,255,255))
+        self.window.blit(text, (6,6))
+        self.player.drawCharges(self.window)
 
     def handleKey(self, keyCode):
         if keyCode == K_SPACE:
