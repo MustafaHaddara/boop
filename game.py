@@ -111,6 +111,9 @@ class Player(GameObject):
     def clearPulse(self):
         self.pulse = None
 
+    def getPulse(self):
+        return self.pulse
+
 
 class Pulse(GameObject):
     def __init__(self, x, y, energy, callback):
@@ -125,6 +128,12 @@ class Pulse(GameObject):
             self.radius += 1
         else:
             self.killme()
+
+    def overlaps(self, x, y):
+        x2 = (self.x - x)**2
+        y2 = (self.y - y)**2
+        dist = (x2 + y2)**0.5
+        return (dist <= self.radius+2)
 
 
 class GameController(object):
@@ -157,6 +166,7 @@ class GameController(object):
             if playerInput:
                 # AI doesn't get to move if the player hasn't moved
                 self.aiController.computePositions()
+            self.aiController.detectPulseCollisions(self.player.getPulse())
             self.aiController.draw(self.window)
 
             clock.tick_busy_loop(frameRate)
@@ -251,6 +261,16 @@ class AIController(object):
                 else:
                     e.x = newLoc.x
                     e.y = newLoc.y
+        for e in toDelete:
+            self.enemies.remove(e)
+
+    def detectPulseCollisions(self, pulse):
+        if pulse is None:
+            return
+        toDelete = []
+        for e in self.enemies:
+            if pulse.overlaps(e.x + CELL_SIZE/2, e.y + CELL_SIZE/2):
+                toDelete.append(e)
         for e in toDelete:
             self.enemies.remove(e)
 
