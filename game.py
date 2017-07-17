@@ -122,6 +122,7 @@ class Player(GameObject):
     def __init__(self, pos):
         super(self.__class__, self).__init__(pos.x, pos.y)
         self.pulse = None
+        self.dying = None
         self.explosions = []
         self.energy = 0
 
@@ -131,6 +132,8 @@ class Player(GameObject):
         gfxdraw.filled_circle(window, center[0], center[1], radius, GOAL_COLOR)
         if self.pulse is not None:
             self.pulse.draw(window)
+        if self.dying is not None:
+            self.dying.draw(window)
         for explosion in self.explosions:
             explosion.draw(window)
 
@@ -204,21 +207,28 @@ class Player(GameObject):
             if numRings%2:
                 gfxdraw.circle(window, center[0],center[1], radius, color)
 
+    def kill(self, callback):
+        pos = self.getCenter()
+        self.dying = Pulse(pos[0], pos[1], 4, callback)
+        self.dying.color = ENEMY_COLOR
+        self.dying.speed = 2
+
 
 class Pulse(GameObject):
     def __init__(self, x, y, energy, callback):
         super(self.__class__, self).__init__(x, y)
         self.energy = energy * CELL_SIZE + (CELL_SIZE/2)
         self.radius = 2
-        self.killme = callback
+        self.speed = 1
+        self.onCompleted = callback
         self.color = UI_COLOR_FILLED
 
     def draw(self, window):
         if (self.radius < self.energy):
             gfxdraw.circle(window, self.x, self.y, self.radius, self.color)
-            self.radius += 1
+            self.radius += self.speed
         else:
-            self.killme(self)
+            self.onCompleted(self)
 
     def overlaps(self, x, y):
         x2 = (self.x - x)**2
@@ -255,16 +265,27 @@ class GameController(object):
     def run(self):
         frameRate = 60
         clock = pygame.time.Clock()
+        killed = False
         while True:
-            start = datetime.now().microsecond
+            # get input
+            if not killed:
+                playerInput = self.handleEvents()
+                if playerInput:
+                    # AI doesn't get to move if the player hasn't moved
+                    self.aiController.computePositions()
 
-            playerInput = self.handleEvents()
+                # detect collisions
+                self.aiController.detectPulseCollisions(self.player.getPulse())
+                if self.aiController.detectPlayerCollisions(self.player):
+                    killed = True
+                    self.player.kill(self.end)
+            else:
+                # poll events so game doesn't freeze
+                pygame.event.get()
+
+            # draw
             self.drawCells()
             self.player.draw(self.window)
-            if playerInput:
-                # AI doesn't get to move if the player hasn't moved
-                self.aiController.computePositions()
-            self.aiController.detectPulseCollisions(self.player.getPulse())
             self.aiController.draw(self.window)
             self.drawUI()
 
@@ -280,16 +301,6 @@ class GameController(object):
                     return self.handleKey(event.key)
             elif event.type == QUIT:
                 self.quit()
-
-    def drawCells(self):
-        for row in self.cells:
-            for cell in row:
-                cell.draw(self.window)
-
-    def drawUI(self):
-        text = self.font.render(self.player.getEnergyString(), True, UI_COLOR_FILLED)
-        self.window.blit(text, (6,6))
-        self.player.drawCharges(self.window)
 
     def handleKey(self, keyCode):
         oldPlayerPos = self.player.pos()
@@ -336,6 +347,20 @@ class GameController(object):
 
         # recompute AI paths
         self.aiController.findPaths(self.cells, self.getCell(oldCoords))
+
+    def drawCells(self):
+        for row in self.cells:
+            for cell in row:
+                cell.draw(self.window)
+
+    def drawUI(self):
+        text = self.font.render(self.player.getEnergyString(), True, UI_COLOR_FILLED)
+        self.window.blit(text, (6,6))
+        self.player.drawCharges(self.window)
+
+    def end(self, _):
+        print 'Ending game...'
+        self.quit()
 
     def quit(self):
         pygame.quit()
@@ -410,6 +435,13 @@ class AIController(object):
                         e.move(newLoc)
         for e in toDelete:
             self.killEnemy(e)
+
+    def detectPlayerCollisions(self, player):
+        for e in self.enemies:
+            if e.gridPos() == player.gridPos():
+                self.killEnemy(e)
+                return True
+        return False
 
     def detectPulseCollisions(self, pulse):
         if pulse is None:
