@@ -73,19 +73,55 @@ class Cell(GameObject):
 
 
 class Enemy(GameObject):
+    def __init__(self, x, y):
+        super(Enemy, self).__init__(x, y)
+        self.color = ENEMY_COLOR
+        self.radius = CELL_SIZE / 8
+
     def draw(self, window):
         center = (self.x + (CELL_SIZE / 2), self.y + (CELL_SIZE / 2))
-        radius = CELL_SIZE / 8
-        gfxdraw.filled_circle(window, center[0], center[1], radius, ENEMY_COLOR)
+        gfxdraw.filled_circle(window, center[0], center[1], self.radius, self.color)
 
     def getGridPos(self):
         return (self.x / CELL_SIZE, self.y / CELL_SIZE)
+
+    def move(self, pos):
+        self.x = pos.x
+        self.y = pos.y
+
+
+class EnemyWall(Enemy):
+    def __init__(self, x, y, createWall):
+        super(self.__class__, self).__init__(x, y)
+        self.color = UI_COLOR_FILLED
+        self.radius = self.radius * 2
+        self.lifetime = 20
+        self.killme = createWall
+        self.darkened = False
+
+    def draw(self, window):
+        super(self.__class__, self).draw(window)
+        if self.lifetime == 0:
+            self.killme(self)
+        if self.lifetime in [10, 5, 3,2,1]:
+            self.darken()
+    
+    def move(self, pos):
+        super(self.__class__, self).move(pos)
+        self.lifetime -= 1
+        self.darkened = False
+
+    def darken(self):
+        if not self.darkened:
+            self.color = tuple(max(i-16, 0) for i in self.color)
+            self.darkened = True
 
 
 class Player(GameObject):
     def __init__(self, pos):
         super(self.__class__, self).__init__(pos.x, pos.y)
         self.pulse = None
+        self.killed = None
         self.energy = 0
 
     def draw(self, window):
@@ -94,6 +130,8 @@ class Player(GameObject):
         gfxdraw.filled_circle(window, center[0], center[1], radius, GOAL_COLOR)
         if self.pulse is not None:
             self.pulse.draw(window)
+        if self.killed is not None:
+            self.killed.draw(window)
 
     def move(self, pos):
         self.energy += 1
@@ -115,6 +153,15 @@ class Player(GameObject):
 
     def getEnergyString(self):
         return 'Energy: ' + str(self.energy)
+
+    def killedEnemy(self):
+        self.energy += 1
+        pos = self.getCenter()
+        self.killed = Pulse(pos[0], pos[1], 0, self.clearKillAnim)
+        self.killed.color = GOAL_COLOR
+
+    def clearKillAnim(self):
+        self.killed = None
 
     def getCharges(self):
         # 0     -> 0
@@ -162,10 +209,11 @@ class Pulse(GameObject):
         self.energy = energy * CELL_SIZE + (CELL_SIZE/2)
         self.radius = 2
         self.killme = callback
+        self.color = UI_COLOR_FILLED
 
     def draw(self, window):
         if (self.radius < self.energy):
-            gfxdraw.circle(window, self.x, self.y, self.radius, UI_COLOR_FILLED)
+            gfxdraw.circle(window, self.x, self.y, self.radius, self.color)
             self.radius += 1
         else:
             self.killme()
@@ -196,8 +244,10 @@ class GameController(object):
 
         self.player = Player(self.getCellXY(x=RM_WIDTH/(2*CELL_SIZE), y=RM_HEIGHT/(2*CELL_SIZE)))
         pos = self.normalizePixelCoord(self.player.pos())
+        self.killSpot = None
+        self.killAnim = 0
 
-        self.aiController = AIController()
+        self.aiController = AIController(self.evolveWall)
         self.aiController.findPaths(self.cells, self.getCell(pos))
 
     def run(self):
@@ -240,8 +290,10 @@ class GameController(object):
         self.player.drawCharges(self.window)
 
     def handleKey(self, keyCode):
+        oldPlayerPos = self.player.pos()
         if keyCode == K_SPACE:
             self.player.fire()
+            return False
         elif keyCode == K_UP:
             self.movePlayer('up', CELL_SIZE)
         elif keyCode == K_DOWN:
@@ -252,21 +304,34 @@ class GameController(object):
             self.movePlayer('left', CELL_SIZE)
         else:
             return False
-        pos = self.normalizePixelCoord(self.player.pos())
-        self.aiController.findPaths(self.cells, self.getCell(pos))
         return True
 
     def movePlayer(self, direction, distance):
-        newPos = self.player.pos()
+        oldPlayerPos = self.player.pos()
+        oldCoords = self.normalizePixelCoord(oldPlayerPos)
+
+        # compute new position
         d = distance if not (direction == 'left' or direction == 'up') else -1*distance
         if direction == 'left' or direction == 'right':
-            newPos = (newPos[0]+d, newPos[1])
+            newPos = (oldPlayerPos[0]+d, oldPlayerPos[1])
         elif direction == 'up' or direction == 'down':
-            newPos = (newPos[0], newPos[1]+d)
+            newPos = (oldPlayerPos[0], oldPlayerPos[1]+d)
+
+        # can we move into this spot?
+        # first, get this location as a cell coordinate
         coords = self.normalizePixelCoord(newPos)
         cell = self.getCell(coords)
+        # is there a wall here?
         if not cell.isWall():
             self.player.move(newPos)
+            # is there an enemy on this spot? if so, kill it
+            maybeEnemy = self.aiController.findEnemyInCell(coords)
+            if maybeEnemy is not None and not isinstance(maybeEnemy, EnemyWall):
+                self.aiController.killEnemy(maybeEnemy)
+                self.player.killedEnemy()
+
+        # recompute AI paths
+        self.aiController.findPaths(self.cells, self.getCell(oldCoords))
 
     def quit(self):
         pygame.quit()
@@ -282,13 +347,16 @@ class GameController(object):
     def normalizePixelCoord(self, coord):
         return (coord[0] / CELL_SIZE, coord[1] / CELL_SIZE)
 
+    def evolveWall(self, enemy):
+        self.aiController.killEnemy(enemy)
+        coords = self.normalizePixelCoord(enemy.pos())
+        self.getCell(coords).flip()
+
 
 class AIController(object):
-    def __init__(self):
+    def __init__(self, evolveWallCallback):
         self.frontier = Queue()
-        # self.frontier.put(goal)
         self.edges = {}
-        # self.edges[goal] = None
         self.enemies = []
         self.goal = None
         self.spawnLocations = [(CELL_SIZE, CELL_SIZE), 
@@ -296,8 +364,18 @@ class AIController(object):
                                (RM_WIDTH - 2*CELL_SIZE, RM_HEIGHT - 2*CELL_SIZE), 
                                (CELL_SIZE, RM_HEIGHT - 2*CELL_SIZE)]
         self.killed = False
+        self.evolveWall = evolveWallCallback
         self.spawnThread = threading.Thread(target=self.spawnThreadControl)
         self.spawnThread.start()
+
+    def findEnemyInCell(self, gp):
+        for e in self.enemies:
+            if e.getGridPos() == gp:
+                return e
+        return None
+
+    def killEnemy(self, e):
+        self.enemies.remove(e)
 
     def findPaths(self, cells, targetCell):
         self.goal = targetCell
@@ -323,10 +401,9 @@ class AIController(object):
                 if newLoc is None:
                     toDelete.append(e)
                 else:
-                    e.x = newLoc.x
-                    e.y = newLoc.y
+                    e.move(newLoc)
         for e in toDelete:
-            self.enemies.remove(e)
+            self.killEnemy(e)
 
     def detectPulseCollisions(self, pulse):
         if pulse is None:
@@ -336,7 +413,7 @@ class AIController(object):
             if pulse.overlaps(e.x + CELL_SIZE/2, e.y + CELL_SIZE/2):
                 toDelete.append(e)
         for e in toDelete:
-            self.enemies.remove(e)
+            self.killEnemy(e)
 
     def draw(self, window):
         for e in self.enemies:
@@ -350,7 +427,10 @@ class AIController(object):
     def spawnEnemy(self):
         idx = random.randint(0, len(self.spawnLocations)-1)
         spawnLocation = self.spawnLocations[idx]
-        e = Enemy(spawnLocation[0], spawnLocation[1])
+        if random.randint(0,3):
+            e = Enemy(spawnLocation[0], spawnLocation[1])
+        else:
+            e = EnemyWall(spawnLocation[0], spawnLocation[1], self.evolveWall)
         self.enemies.append(e)
 
     def quit(self):
@@ -381,9 +461,10 @@ class AIController(object):
             if not c.isWall():
                 neighbors.append(c)
 
+        random.shuffle(neighbors)
         return neighbors
 
-    def checkVals(self, v1, v2, m=0):
+    def checkVals(self, v1, v2, m):
         if v1 < 0:
             vals = [v2]
         elif v2 >= m:
