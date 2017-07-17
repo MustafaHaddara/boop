@@ -122,19 +122,14 @@ class Player(GameObject):
     def __init__(self, pos):
         super(self.__class__, self).__init__(pos.x, pos.y)
         self.pulse = None
-        self.dying = None
-        self.explosions = []
+        self.animations = []
         self.energy = 0
 
     def draw(self, window):
         center = (self.x + (CELL_SIZE / 2), self.y + (CELL_SIZE / 2))
         radius = CELL_SIZE / 4
         gfxdraw.filled_circle(window, center[0], center[1], radius, GOAL_COLOR)
-        if self.pulse is not None:
-            self.pulse.draw(window)
-        if self.dying is not None:
-            self.dying.draw(window)
-        for explosion in self.explosions:
+        for explosion in self.animations:
             explosion.draw(window)
 
     def move(self, pos):
@@ -142,15 +137,19 @@ class Player(GameObject):
         self.x,self.y = pos
 
     def fire(self):
-        pos = self.getCenter()
-        self.pulse = Pulse(pos[0], pos[1], self.getCharges(), self.clearPulse)
-        self.energy = 0
+        if self.pulse is None:
+            pos = self.getCenter()
+            self.pulse = Pulse(pos[0], pos[1], self.getCharges(), self.clearPulse)
+            self.pulse.speed = 2
+            self.animations.append(self.pulse)
+            self.energy = 0
 
     def getCenter(self):
         return (self.x + (CELL_SIZE / 2), self.y + (CELL_SIZE / 2))
 
     def clearPulse(self, oldPulse):
         self.pulse = None
+        self.clearAnim(oldPulse)
 
     def getPulse(self):
         return self.pulse
@@ -161,12 +160,12 @@ class Player(GameObject):
     def killedEnemy(self):
         self.energy += 1
         pos = self.getCenter()
-        explosion = Pulse(pos[0], pos[1], 0, self.clearKillAnim)
+        explosion = Pulse(pos[0], pos[1], 0, self.clearAnim)
         explosion.color = GOAL_COLOR
-        self.explosions.append(explosion)
+        self.animations.append(explosion)
 
-    def clearKillAnim(self, completedExplosion):
-        self.explosions.remove(completedExplosion)
+    def clearAnim(self, completed):
+        self.animations.remove(completed)
 
     def getCharges(self):
         # 0     -> 0
@@ -209,9 +208,10 @@ class Player(GameObject):
 
     def kill(self, callback):
         pos = self.getCenter()
-        self.dying = Pulse(pos[0], pos[1], 4, callback)
-        self.dying.color = ENEMY_COLOR
-        self.dying.speed = 2
+        dying = Pulse(pos[0], pos[1], 3, callback)
+        dying.color = ENEMY_COLOR
+        dying.speed = 2
+        self.animations.append(dying)
 
 
 class Pulse(GameObject):
