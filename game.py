@@ -136,6 +136,9 @@ class Player(GameObject):
         self.energy += 1
         self.x,self.y = pos
 
+    def won(self):
+        return self.energy >= 150
+
     def fire(self):
         if self.pulse is None:
             pos = self.getCenter()
@@ -243,6 +246,9 @@ class GameController(object):
         pygame.event.set_allowed([pygame.QUIT, MOUSEBUTTONDOWN])
         self.window = pygame.display.set_mode((RM_WIDTH, RM_HEIGHT))
         self.font = pygame.font.Font(None, 20)
+        self.winningFont = pygame.font.Font(None, 72)
+        self.won = False
+        self.killed = False
 
         self.cells = []
         maxX = RM_WIDTH  - CELL_SIZE
@@ -255,20 +261,22 @@ class GameController(object):
             self.cells.append(row)
 
         self.player = Player(self.getCellXY(x=RM_WIDTH/(2*CELL_SIZE), y=RM_HEIGHT/(2*CELL_SIZE)))
-        pos = self.normalizePixelCoord(self.player.pos())
+        
         self.killSpot = None
         self.killAnim = 0
 
+        pos = self.normalizePixelCoord(self.player.pos())
         self.aiController = AIController(self.evolveWall)
         self.aiController.findPaths(self.cells, self.getCell(pos))
 
     def run(self):
         frameRate = 60
         clock = pygame.time.Clock()
-        killed = False
         while True:
             # get input
-            if not killed:
+            if (self.killed or self.won):
+                self.handleEndScreenEvents()
+            else:
                 playerInput = self.handleEvents()
                 if playerInput:
                     # AI doesn't get to move if the player hasn't moved
@@ -277,11 +285,12 @@ class GameController(object):
                 # detect collisions
                 self.aiController.detectPulseCollisions(self.player.getPulse())
                 if self.aiController.detectPlayerCollisions(self.player):
-                    killed = True
+                    self.killed = True
                     self.player.kill(self.end)
-            else:
-                # poll events so game doesn't freeze
-                pygame.event.get()
+
+            # check win condition
+            if self.player.won():
+                self.won = True
 
             # draw
             self.drawCells()
@@ -302,8 +311,14 @@ class GameController(object):
             elif event.type == QUIT:
                 self.quit()
 
+    def handleEndScreenEvents(self):
+        for event in pygame.event.get():
+            if event.type == KEYDOWN:
+                self.quit()
+            elif event.type == QUIT:
+                self.quit()
+
     def handleKey(self, keyCode):
-        oldPlayerPos = self.player.pos()
         if keyCode == K_SPACE:
             self.player.fire()
             return False
@@ -358,9 +373,25 @@ class GameController(object):
         self.window.blit(text, (6,6))
         self.player.drawCharges(self.window)
 
+        if self.won:
+            self.drawTwoLines('You Won!', 'Press any key to continue')
+        if self.killed:
+            self.drawTwoLines('You Lose!', 'Press any key to continue')
+            
+    def drawTwoLines(self, l1, l2):
+        text1 = self.winningFont.render(l1, True, UI_COLOR_FILLED)
+        text2 = self.winningFont.render(l2, True, UI_COLOR_FILLED)
+
+        x = (RM_WIDTH - text1.get_width()) / 2
+        y = (RM_HEIGHT - text1.get_height()) / 2 - 40
+        self.window.blit(text1, (x,y))
+
+        x = (RM_WIDTH - text2.get_width()) / 2
+        y = (RM_HEIGHT - text2.get_height()) / 2 + 40
+        self.window.blit(text2, (x,y))
+
     def end(self, _):
-        print 'Ending game...'
-        self.quit()
+        pass
 
     def quit(self):
         pygame.quit()
