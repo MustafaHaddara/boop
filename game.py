@@ -122,7 +122,7 @@ class Player(GameObject):
     def __init__(self, pos):
         super(self.__class__, self).__init__(pos.x, pos.y)
         self.pulse = None
-        self.killed = None
+        self.explosions = []
         self.energy = 0
 
     def draw(self, window):
@@ -131,8 +131,8 @@ class Player(GameObject):
         gfxdraw.filled_circle(window, center[0], center[1], radius, GOAL_COLOR)
         if self.pulse is not None:
             self.pulse.draw(window)
-        if self.killed is not None:
-            self.killed.draw(window)
+        for explosion in self.explosions:
+            explosion.draw(window)
 
     def move(self, pos):
         self.energy += 1
@@ -146,7 +146,7 @@ class Player(GameObject):
     def getCenter(self):
         return (self.x + (CELL_SIZE / 2), self.y + (CELL_SIZE / 2))
 
-    def clearPulse(self):
+    def clearPulse(self, oldPulse):
         self.pulse = None
 
     def getPulse(self):
@@ -158,11 +158,12 @@ class Player(GameObject):
     def killedEnemy(self):
         self.energy += 1
         pos = self.getCenter()
-        self.killed = Pulse(pos[0], pos[1], 0, self.clearKillAnim)
-        self.killed.color = GOAL_COLOR
+        explosion = Pulse(pos[0], pos[1], 0, self.clearKillAnim)
+        explosion.color = GOAL_COLOR
+        self.explosions.append(explosion)
 
-    def clearKillAnim(self):
-        self.killed = None
+    def clearKillAnim(self, completedExplosion):
+        self.explosions.remove(completedExplosion)
 
     def getCharges(self):
         # 0     -> 0
@@ -217,7 +218,7 @@ class Pulse(GameObject):
             gfxdraw.circle(window, self.x, self.y, self.radius, self.color)
             self.radius += 1
         else:
-            self.killme()
+            self.killme(self)
 
     def overlaps(self, x, y):
         x2 = (self.x - x)**2
