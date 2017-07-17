@@ -46,6 +46,9 @@ class GameObject(object):
     def pos(self):
         return (self.x, self.y)
 
+    def gridPos(self):
+        return (self.x / CELL_SIZE, self.y / CELL_SIZE)
+
 
 class Cell(GameObject):
     def __init__(self, x, y, wall=False):
@@ -82,9 +85,6 @@ class Enemy(GameObject):
         center = (self.x + (CELL_SIZE / 2), self.y + (CELL_SIZE / 2))
         gfxdraw.filled_circle(window, center[0], center[1], self.radius, self.color)
 
-    def getGridPos(self):
-        return (self.x / CELL_SIZE, self.y / CELL_SIZE)
-
     def move(self, pos):
         self.x = pos.x
         self.y = pos.y
@@ -97,24 +97,25 @@ class EnemyWall(Enemy):
         self.radius = self.radius * 2
         self.lifetime = 20
         self.killme = createWall
-        self.darkened = False
+        self.advanced = False
 
     def draw(self, window):
         super(self.__class__, self).draw(window)
         if self.lifetime == 0:
             self.killme(self)
         if self.lifetime in [10, 5, 3,2,1]:
-            self.darken()
+            self.nextState()
     
     def move(self, pos):
         super(self.__class__, self).move(pos)
         self.lifetime -= 1
-        self.darkened = False
+        self.advanced = False
 
-    def darken(self):
-        if not self.darkened:
+    def nextState(self):
+        if not self.advanced:
             self.color = tuple(max(i-16, 0) for i in self.color)
-            self.darkened = True
+            self.radius += 1
+            self.advanced = True
 
 
 class Player(GameObject):
@@ -306,7 +307,7 @@ class GameController(object):
             return False
         return True
 
-    def movePlayer(self, direction, distance):
+    def movePlayer(self, direction, distance, recompute=True):
         oldPlayerPos = self.player.pos()
         oldCoords = self.normalizePixelCoord(oldPlayerPos)
 
@@ -329,6 +330,8 @@ class GameController(object):
             if maybeEnemy is not None and not isinstance(maybeEnemy, EnemyWall):
                 self.aiController.killEnemy(maybeEnemy)
                 self.player.killedEnemy()
+                # killing an enemy gives a boost
+                self.movePlayer(direction, distance, False)
 
         # recompute AI paths
         self.aiController.findPaths(self.cells, self.getCell(oldCoords))
@@ -370,7 +373,7 @@ class AIController(object):
 
     def findEnemyInCell(self, gp):
         for e in self.enemies:
-            if e.getGridPos() == gp:
+            if e.gridPos() == gp:
                 return e
         return None
 
@@ -394,14 +397,16 @@ class AIController(object):
     def computePositions(self):
         toDelete = []
         for e in self.enemies:
-            gridPos = e.getGridPos()
+            gridPos = e.gridPos()
             loc = self.cells[gridPos[1]][gridPos[0]]
             if loc in self.edges:
                 newLoc = self.edges[loc]
                 if newLoc is None:
                     toDelete.append(e)
                 else:
-                    e.move(newLoc)
+                    newGridPos = newLoc.gridPos()
+                    if self.findEnemyInCell(newGridPos) is None:
+                        e.move(newLoc)
         for e in toDelete:
             self.killEnemy(e)
 
